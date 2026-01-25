@@ -59,6 +59,7 @@ class Renderer:
         self._deformed_scale: float = 30.0
         self._render_nodes: bool = True
         self._render_loads: bool = True
+        self._render_lcs: bool = False
         self._color_map: Optional[str] = None
         self._combo_name: Optional[str] = 'Combo 1'
         self._case: Optional[str] = None
@@ -173,6 +174,14 @@ class Renderer:
     @render_loads.setter
     def render_loads(self, render_loads: bool) -> None:
         self._render_loads = render_loads
+
+    @property
+    def render_lcs(self) -> bool:
+        return self._render_lcs
+
+    @render_lcs.setter
+    def render_lcs(self, render_lcs: bool) -> None:
+        self._render_lcs = render_lcs
 
     @property
     def color_map(self) -> Optional[str]:
@@ -405,7 +414,7 @@ class Renderer:
                 vis_spring.add_to_plotter(self.plotter)
 
         if self.model.members:
-            vis_members = [VisMember(member, self.theme) for member in self.model.members.values()]
+            vis_members = [VisMember(member, self.theme, self.annotation_size, self.render_lcs) for member in self.model.members.values()]
             for vis_member in vis_members:
                 vis_member.add_to_plotter(self.plotter)
 
@@ -1780,19 +1789,28 @@ class VisSpring:
 class VisMember:
     """Visual wrapper for a Member3D as a simple line."""
 
-    def __init__(self, member: 'Member3D', theme: str) -> None:
+    def __init__(self, member: 'Member3D', theme: str, annotation_size: float = 0.0, render_lcs: bool = False) -> None:
         """Build visual elements for a member.
 
         :param Member3D member: Member to visualize.
         :param str theme: Rendering theme (``'default'`` or ``'print'``).
+        :param float annotation_size: Size for LCS arrows.
+        :param bool render_lcs: Whether to render the local coordinate system.
         """
         self.member = member
         self.theme = theme
-        self.mesh: pv.PolyData = self._build_geometry()
+        self.annotation_size = annotation_size
+        self.render_lcs = render_lcs
+        self.main_mesh: pv.PolyData = self._build_geometry()
+        self.lcs_meshes: List[Tuple[pv.PolyData, str]] = []
+        
         self.label = member.name
         self.label_point = [(member.i_node.X + member.j_node.X) / 2,
                             (member.i_node.Y + member.j_node.Y) / 2,
                             (member.i_node.Z + member.j_node.Z) / 2]
+        
+        if self.render_lcs:
+            self._build_lcs()
 
     def _build_geometry(self) -> pv.PolyData:
         line = pv.Line()
@@ -1800,13 +1818,55 @@ class VisMember:
         line.points[1] = [self.member.j_node.X, self.member.j_node.Y, self.member.j_node.Z]
         return line
 
+    def _build_lcs(self) -> None:
+        """Build arrows for the local coordinate system at the member midpoint."""
+        # Midpoint of the member
+        mid = np.array(self.label_point)
+        
+        # Get direction cosines (transformation matrix)
+        # T is 12x12, we need the 3x3 rotation block
+        T = self.member.T()
+        x_axis = T[0, 0:3]
+        y_axis = T[1, 0:3]
+        z_axis = T[2, 0:3]
+        
+        # Arrow scale - use annotation size
+        s = self.annotation_size
+        
+        # Build arrows for each axis
+        # Local x: Red, Local y: Green, Local z: Blue
+        axes = [
+            (x_axis, 'red'),
+            (y_axis, '#00FF00'), # Green
+            (z_axis, 'blue')
+        ]
+        
+        for axis, color in axes:
+            # Create a line for the arrow shaft
+            shaft_end = mid + axis * s * 2
+            shaft = pv.Line(mid, shaft_end)
+            
+            # Create a cone for the arrow tip
+            tip = pv.Cone(
+                center=mid + axis * s * 2.2,
+                direction=axis,
+                height=s * 0.4,
+                radius=s * 0.15
+            )
+            
+            self.lcs_meshes.append((shaft, color))
+            self.lcs_meshes.append((tip, color))
+
     def add_to_plotter(self, plotter: pv.Plotter) -> None:
-        """Add the member line to the plotter.
+        """Add the member line and optional LCS to the plotter.
 
         :param pv.Plotter plotter: Plotter to receive the mesh.
         """
         color = 'black' if self.theme == 'print' else 'black'
-        plotter.add_mesh(self.mesh, color=color, line_width=2)
+        plotter.add_mesh(self.main_mesh, color=color, line_width=2)
+        
+        for mesh, color in self.lcs_meshes:
+            plotter.add_mesh(mesh, color=color, line_width=2)
 
 
 class VisDeformedMember:
