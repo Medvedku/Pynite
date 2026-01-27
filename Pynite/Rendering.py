@@ -69,6 +69,9 @@ class Renderer:
         self._scalar_bar_text_size: int = 24
         self._member_diagrams: Optional[str] = None  # Options: None, 'Fy', 'Fz', 'My', 'Mz', 'Fx', 'Tx'
         self._diagram_scale: float = 30.0
+        self._show_selection: Optional[List[str]] = None
+        self._hide_selection: Optional[List[str]] = None
+        self._selection_opacity: float = 0.5
         self.theme: str = 'default'
 
         # Callback list for post-update customization:
@@ -272,6 +275,59 @@ class Renderer:
     def diagram_scale(self, scale: float) -> None:
         self._diagram_scale = scale
 
+    @property
+    def show_selection(self) -> Optional[List[str]]:
+        """List of member names to show with full opacity while others are dimmed."""
+        return self._show_selection
+
+    @show_selection.setter
+    def show_selection(self, selection: Optional[List[str]]) -> None:
+        self._show_selection = selection
+        # Reset hide_selection if show_selection is set
+        if selection is not None:
+            self._hide_selection = None
+
+    @property
+    def hide_selection(self) -> Optional[List[str]]:
+        """List of member names to dim while others remain at full opacity."""
+        return self._hide_selection
+
+    @hide_selection.setter
+    def hide_selection(self, selection: Optional[List[str]]) -> None:
+        self._hide_selection = selection
+        # Reset show_selection if hide_selection is set
+        if selection is not None:
+            self._show_selection = None
+
+    @property
+    def selection_opacity(self) -> float:
+        """Opacity level for dimmed members (0.0 to 1.0)."""
+        return self._selection_opacity
+
+    @selection_opacity.setter
+    def selection_opacity(self, opacity: float) -> None:
+        self._selection_opacity = opacity
+
+    def render_active(self, selection: List[str], selection_opacity: float = 0.5) -> None:
+        """Convenience method to render with a specific selection active.
+
+        :param List[str] selection: List of member names to show with full opacity.
+        :param float selection_opacity: Opacity for non-selected members (default 0.5).
+        """
+        self.show_selection = selection
+        self.selection_opacity = selection_opacity
+        self.render_model()
+
+    def render_hidden(self, selection: List[str], selection_opacity: float = 0.5) -> None:
+        """Convenience method to render with a specific selection hidden (dimmed).
+
+        :param List[str] selection: List of member names to dim.
+        :param float selection_opacity: Opacity for selected members (default 0.5).
+        """
+        self.hide_selection = selection
+        self.selection_opacity = selection_opacity
+        self.render_model()
+
     def _calculate_auto_annotation_size(self) -> float:
         """Calculate automatic annotation size as 5% of shortest node distance.
 
@@ -410,6 +466,14 @@ class Renderer:
         self._spring_label_points = []
         self._spring_labels = []
 
+        # Helper function to determine opacity for a visual element based on its name
+        def get_opacity(name: str) -> float:
+            if self.show_selection is not None:
+                return 1.0 if name in self.show_selection else self.selection_opacity
+            if self.hide_selection is not None:
+                return self.selection_opacity if name in self.hide_selection else 1.0
+            return 1.0
+
         # Build visual helper objects. These classes encapsulate geometry and label bookkeeping
         # so that the renderer logic stays readable while still leveraging PyVista efficiently.
         vis_nodes: List[VisNode] = []
@@ -418,18 +482,18 @@ class Renderer:
 
         if self.render_nodes:
             node_color = 'black' if self.theme == 'print' else 'grey'
-            vis_nodes = [VisNode(node, self.annotation_size, node_color) for node in self.model.nodes.values()]
+            vis_nodes = [VisNode(node, self.annotation_size, node_color, get_opacity(node.name)) for node in self.model.nodes.values()]
             for vis_node in vis_nodes:
                 vis_node.add_to_plotter(self.plotter)
 
         if self.model.springs:
             # Undeformed springs are added here; deformed ones come later if requested.
-            vis_springs = [VisSpring(spring, self.annotation_size, 'grey', False, self.deformed_scale, self.combo_name) for spring in self.model.springs.values()]
+            vis_springs = [VisSpring(spring, self.annotation_size, 'grey', False, self.deformed_scale, self.combo_name, get_opacity(spring.name)) for spring in self.model.springs.values()]
             for vis_spring in vis_springs:
                 vis_spring.add_to_plotter(self.plotter)
 
         if self.model.members:
-            vis_members = [VisMember(member, self.theme, self.annotation_size, self.render_lcs, self.render_lcs_size) for member in self.model.members.values()]
+            vis_members = [VisMember(member, self.theme, self.annotation_size, self.render_lcs, self.render_lcs_size, get_opacity(member.name)) for member in self.model.members.values()]
             for vis_member in vis_members:
                 vis_member.add_to_plotter(self.plotter)
 
@@ -437,11 +501,11 @@ class Renderer:
         # undeformed geometry remains visible alongside deformed overlays when desired.
         if self.deformed_shape:
             for member in self.model.members.values():
-                vis_def_member = VisDeformedMember(member, self.deformed_scale, self.combo_name)
+                vis_def_member = VisDeformedMember(member, self.deformed_scale, self.combo_name, get_opacity(member.name))
                 vis_def_member.add_to_plotter(self.plotter)
 
             for spring in self.model.springs.values():
-                vis_def_spring = VisSpring(spring, self.annotation_size, 'red', True, self.deformed_scale, self.combo_name)
+                vis_def_spring = VisSpring(spring, self.annotation_size, 'red', True, self.deformed_scale, self.combo_name, get_opacity(spring.name))
                 vis_def_spring.add_to_plotter(self.plotter)
 
         # Render labels if requested. We gather label locations from the visual helper classes to
@@ -954,7 +1018,7 @@ class Renderer:
                 self.plotter.add_mesh(line, color='red', line_width=2)
 
     def plot_pt_load(self, position: Tuple[float, float, float], direction: Union[Tuple[float, float, float], np.ndarray],
-                    length: float, label_text: Optional[Union[str, float, int]] = None, color: str = 'green') -> None:
+                    length: float, label_text: Optional[Union[str, float, int]] = None, color: str = 'green', opacity: float = 1.0) -> None:
         """Add a point-load arrow to the plotter.
 
         :param tuple position: Arrow tip coordinates ``(X, Y, Z)``.
@@ -983,7 +1047,7 @@ class Renderer:
                               height=tip_length, radius=radius)
 
         # Plot the tip
-        self.plotter.add_mesh(tip, color=color)
+        self.plotter.add_mesh(tip, color=color, opacity=opacity)
 
         # Create the shaft (you'll need to specify the second point)
         X_tail = position[0] - unitVector[0]*length
@@ -997,12 +1061,12 @@ class Renderer:
             self._load_label_points.append([X_tail, Y_tail, Z_tail])
 
         # Plot the shaft
-        self.plotter.add_mesh(shaft, line_width=2, color=color)
+        self.plotter.add_mesh(shaft, line_width=2, color=color, opacity=opacity)
 
     def plot_dist_load(self, position1: Tuple[float, float, float], position2: Tuple[float, float, float],
                       direction: Union[np.ndarray, Tuple[float, float, float]], length1: float, length2: float,
                       label_text1: Optional[Union[str, float, int]], label_text2: Optional[Union[str, float, int]],
-                      color: str = 'green') -> None:
+                      color: str = 'green', opacity: float = 1.0) -> None:
         """Add a linearly varying distributed load to the plotter.
 
         :param tuple position1: Start point of the load.
@@ -1055,16 +1119,16 @@ class Renderer:
                 label_text = None
 
             # Plot the load arrow
-            self.plot_pt_load(position, dir_dir_cos, length, label_text, color)
+            self.plot_pt_load(position, dir_dir_cos, length, label_text, color, opacity=opacity)
 
         # Draw a line between the first and last load arrow's tails (using cylinder here for better visualization)
         tail_line = pv.Line(position1 - dir_dir_cos*length1, position2 - dir_dir_cos*length2)
 
         # Combine all geometry into a single PolyData object
-        self.plotter.add_mesh(tail_line, color=color)
+        self.plotter.add_mesh(tail_line, color=color, opacity=opacity)
 
     def plot_moment(self, center: Tuple[float, float, float], direction: Union[Tuple[float, float, float], np.ndarray],
-                    radius: float, label_text: Optional[Union[str, float, int]] = None, color: str = 'green') -> None:
+                    radius: float, label_text: Optional[Union[str, float, int]] = None, color: str = 'green', opacity: float = 1.0) -> None:
         """Add a concentrated moment to the plotter.
 
         :param tuple center: Center point of the moment arc.
@@ -1085,7 +1149,7 @@ class Renderer:
         arc = pv.CircularArcFromNormal(center, resolution=20, normal=v1, angle=215, polar=v2*radius)
 
         # Add the arc to the plot
-        self.plotter.add_mesh(arc, line_width=2, color=color)
+        self.plotter.add_mesh(arc, line_width=2, color=color, opacity=opacity)
 
         # Generate the arrow tip at the end of the arc
         tip_length = radius/4
@@ -1095,7 +1159,7 @@ class Renderer:
                       radius=cone_radius)
 
         # Add the tip to the plot
-        self.plotter.add_mesh(tip, color=color)
+        self.plotter.add_mesh(tip, color=color, opacity=opacity)
 
         # Create the text label
         if label_text:
@@ -1103,7 +1167,7 @@ class Renderer:
             self._load_label_points.append(text_pos)
             self._load_labels.append(label_text)
 
-    def plot_area_load(self, position0, position1, position2, position3, direction, length, label_text, color='green'):
+    def plot_area_load(self, position0, position1, position2, position3, direction, length, label_text, color='green', opacity=1.0):
         """Add an area load (quad with arrows) to the plotter.
 
         :param tuple position0: First corner of the loaded area.
@@ -1126,15 +1190,15 @@ class Renderer:
         self.p3 = position3 - dir_dir_cos * length
 
         # Plot the area load arrows
-        self.plot_pt_load(position0, dir_dir_cos, length, label_text, color)
-        self.plot_pt_load(position1, dir_dir_cos, length, color=color)
-        self.plot_pt_load(position2, dir_dir_cos, length, color=color)
-        self.plot_pt_load(position3, dir_dir_cos, length, color=color)
+        self.plot_pt_load(position0, dir_dir_cos, length, label_text, color, opacity=opacity)
+        self.plot_pt_load(position1, dir_dir_cos, length, color=color, opacity=opacity)
+        self.plot_pt_load(position2, dir_dir_cos, length, color=color, opacity=opacity)
+        self.plot_pt_load(position3, dir_dir_cos, length, color=color, opacity=opacity)
 
         # Create the area load polygon (quad)
         quad = pv.Quadrilateral([self.p0, self.p1, self.p2, self.p3])
 
-        self.plotter.add_mesh(quad, color=color)
+        self.plotter.add_mesh(quad, color=color, opacity=opacity)
 
     def _calc_max_loads(self):
         """Calculate maximum load magnitudes for normalization.
@@ -1298,12 +1362,20 @@ class Renderer:
         # Return the maximum loads for the load combo or load case
         return max_pt_load, max_moment, max_dist_load, max_area_load
 
-    def plot_loads(self):
+    def plot_loads(self) -> None:
         """Add all loads (nodal, member, plate) to the plotter.
 
         Renders point loads, moments, distributed loads, and area loads
         with appropriate glyphs and labels.
         """
+
+        # Helper function to determine opacity for a visual element based on its name
+        def get_opacity(name: str) -> float:
+            if self.show_selection is not None:
+                return 1.0 if name in self.show_selection else self.selection_opacity
+            if self.hide_selection is not None:
+                return self.selection_opacity if name in self.hide_selection else 1.0
+            return 1.0
 
         # Get the maximum load magnitudes that will be used to normalize the display scale
         max_pt_load, max_moment, max_dist_load, max_area_load = self._calc_max_loads()
@@ -1343,9 +1415,9 @@ class Renderer:
                     if load[0] in {'FX', 'FY', 'FZ'}:
                         self.plot_pt_load((node.X, node.Y, node.Z), direction,
                                           abs(load_value/max_pt_load)*5*self.annotation_size,
-                                          load_value, 'green')
+                                          load_value, 'green', opacity=get_opacity(node.name))
                     elif load[0] in {'MX', 'MY', 'MZ'}:
-                        self.plot_moment((node.X, node.Y, node.Z), direction, abs(load_value/max_moment)*2.5*self.annotation_size, str(load_value), 'green')
+                        self.plot_moment((node.X, node.Y, node.Z), direction, abs(load_value/max_moment)*2.5*self.annotation_size, str(load_value), 'green', opacity=get_opacity(node.name))
 
         # Step through each member
         for member in self.model.members.values():
@@ -1371,30 +1443,31 @@ class Renderer:
                     position = [x_start + dir_cos[0, 0]*x, y_start + dir_cos[0, 1]*x, z_start + dir_cos[0, 2]*x]
 
                     # Display the load
+                    opacity = get_opacity(member.name)
                     if load[0] == 'Fx':
-                        self.plot_pt_load(position, dir_cos[0, :], load_value/max_pt_load*5*self.annotation_size, load_value)
+                        self.plot_pt_load(position, dir_cos[0, :], load_value/max_pt_load*5*self.annotation_size, load_value, opacity=opacity)
                     elif load[0] == 'Fy':
-                        self.plot_pt_load(position, dir_cos[1, :], load_value/max_pt_load*5*self.annotation_size, load_value)
+                        self.plot_pt_load(position, dir_cos[1, :], load_value/max_pt_load*5*self.annotation_size, load_value, opacity=opacity)
                     elif load[0] == 'Fz':
-                        self.plot_pt_load(position, dir_cos[2, :], load_value/max_pt_load*5*self.annotation_size, load_value)
+                        self.plot_pt_load(position, dir_cos[2, :], load_value/max_pt_load*5*self.annotation_size, load_value, opacity=opacity)
                     elif load[0] == 'Mx':
-                        self.plot_moment(position, dir_cos[0, :]*sign, abs(load_value)/max_moment*2.5*self.annotation_size, str(load_value))
+                        self.plot_moment(position, dir_cos[0, :]*sign, abs(load_value)/max_moment*2.5*self.annotation_size, str(load_value), opacity=opacity)
                     elif load[0] == 'My':
-                        self.plot_moment(position, dir_cos[1, :]*sign, abs(load_value)/max_moment*2.5*self.annotation_size, str(load_value))
+                        self.plot_moment(position, dir_cos[1, :]*sign, abs(load_value)/max_moment*2.5*self.annotation_size, str(load_value), opacity=opacity)
                     elif load[0] == 'Mz':
-                        self.plot_moment(position, dir_cos[2, :]*sign, abs(load_value)/max_moment*2.5*self.annotation_size, str(load_value))
+                        self.plot_moment(position, dir_cos[2, :]*sign, abs(load_value)/max_moment*2.5*self.annotation_size, str(load_value), opacity=opacity)
                     elif load[0] == 'FX':
-                        self.plot_pt_load(position, [1, 0, 0], load_value/max_pt_load*5*self.annotation_size, load_value)
+                        self.plot_pt_load(position, [1, 0, 0], load_value/max_pt_load*5*self.annotation_size, load_value, opacity=opacity)
                     elif load[0] == 'FY':
-                        self.plot_pt_load(position, [0, 1, 0], load_value/max_pt_load*5*self.annotation_size, load_value)
+                        self.plot_pt_load(position, [0, 1, 0], load_value/max_pt_load*5*self.annotation_size, load_value, opacity=opacity)
                     elif load[0] == 'FZ':
-                        self.plot_pt_load(position, [0, 0, 1], load_value/max_pt_load*5*self.annotation_size, load_value)
+                        self.plot_pt_load(position, [0, 0, 1], load_value/max_pt_load*5*self.annotation_size, load_value, opacity=opacity)
                     elif load[0] == 'MX':
-                        self.plot_moment(position, [1*sign, 0, 0], abs(load_value)/max_moment*2.5*self.annotation_size, str(load_value))
+                        self.plot_moment(position, [1*sign, 0, 0], abs(load_value)/max_moment*2.5*self.annotation_size, str(load_value), opacity=opacity)
                     elif load[0] == 'MY':
-                        self.plot_moment(position, [0, 1*sign, 0], abs(load_value)/max_moment*2.5*self.annotation_size, str(load_value))
+                        self.plot_moment(position, [0, 1*sign, 0], abs(load_value)/max_moment*2.5*self.annotation_size, str(load_value), opacity=opacity)
                     elif load[0] == 'MZ':
-                        self.plot_moment(position, [0, 0, 1*sign], abs(load_value)/max_moment*2.5*self.annotation_size, str(load_value))
+                        self.plot_moment(position, [0, 0, 1*sign], abs(load_value)/max_moment*2.5*self.annotation_size, str(load_value), opacity=opacity)
 
             # Step through each member distributed load
             for load in member.DistLoads:
@@ -1424,7 +1497,8 @@ class Renderer:
                         elif load[0] == 'FZ': direction = [0, 0, 1]
 
                         # Plot the distributed load
-                        self.plot_dist_load(position1, position2, direction, w1/max_dist_load*5*self.annotation_size, w2/max_dist_load*5*self.annotation_size, str(sig_fig_round(w1, 3)), str(sig_fig_round(w2, 3)), 'green')
+                        opacity = get_opacity(member.name)
+                        self.plot_dist_load(position1, position2, direction, w1/max_dist_load*5*self.annotation_size, w2/max_dist_load*5*self.annotation_size, str(sig_fig_round(w1, 3)), str(sig_fig_round(w2, 3)), 'green', opacity=opacity)
 
         # Step through each plate
         for plate in list(self.model.plates.values()) + list(self.model.quads.values()):
@@ -1455,7 +1529,8 @@ class Renderer:
                     position3 = [plate.n_node.X, plate.n_node.Y, plate.n_node.Z]
 
                     # Create an area load and get its data
-                    self.plot_area_load(position0, position1, position2, position3, dir_cos*sign, load_value/max_area_load*5*self.annotation_size, str(sig_fig_round(load_value, 3)), color='green')
+                    opacity = get_opacity(plate.name)
+                    self.plot_area_load(position0, position1, position2, position3, dir_cos*sign, load_value/max_area_load*5*self.annotation_size, str(sig_fig_round(load_value, 3)), color='green', opacity=opacity)
 
     def plot_member_diagrams(self) -> None:
         """Add internal force/moment diagrams to members.
@@ -1469,6 +1544,14 @@ class Renderer:
         
         # Create diagrams for each active member
         for member in self.model.members.values():
+            
+            # Helper function to determine opacity for a visual element based on its name
+            def get_opacity(name: str) -> float:
+                if self.show_selection is not None:
+                    return 1.0 if name in self.show_selection else self.selection_opacity
+                if self.hide_selection is not None:
+                    return self.selection_opacity if name in self.hide_selection else 1.0
+                return 1.0
             
             # Check if member is active for the specified combo
             if combo_name not in member.active or not member.active[combo_name]:
@@ -1596,9 +1679,10 @@ class Renderer:
                         color = (0, 0, 0)  # Black for print
                     
                     # Add all diagram components to plotter
-                    self.plotter.add_mesh(baseline_polydata, color=color, line_width=1)
-                    self.plotter.add_mesh(diagram_polydata, color=color, line_width=1)
-                    self.plotter.add_mesh(connector_polydata, color=color, line_width=1)
+                    opacity = get_opacity(member.name)
+                    self.plotter.add_mesh(baseline_polydata, color=color, line_width=1, opacity=opacity)
+                    self.plotter.add_mesh(diagram_polydata, color=color, line_width=1, opacity=opacity)
+                    self.plotter.add_mesh(connector_polydata, color=color, line_width=1, opacity=opacity)
                     
                     # Add value labels at max and min points
                     if self.show_labels:
@@ -1634,16 +1718,18 @@ class VisNode:
     Encapsulates construction of node and support-condition glyphs for the plotter.
     """
 
-    def __init__(self, node: 'Node3D', annotation_size: float, color: str) -> None:
+    def __init__(self, node: 'Node3D', annotation_size: float, color: str, opacity: float = 1.0) -> None:
         """Build visual elements for a node.
 
         :param Node3D node: Node to visualize.
         :param float annotation_size: Base size for support glyphs.
         :param str color: Color for all glyphs.
+        :param float opacity: Opacity for the node (default 1.0).
         """
         self.node = node
         self.annotation_size = annotation_size
         self.color = color
+        self.opacity = opacity
         self.label = node.name
         self.label_point = [node.X, node.Y, node.Z]
         self.meshes: List[pv.PolyData] = []
@@ -1708,13 +1794,13 @@ class VisNode:
         :param pv.Plotter plotter: Plotter to receive the meshes.
         """
         for mesh in self.meshes:
-            plotter.add_mesh(mesh, color=self.color)
+            plotter.add_mesh(mesh, color=self.color, opacity=self.opacity)
 
 
 class VisSpring:
     """Visual wrapper for a Spring3D with optional deformed rendering."""
 
-    def __init__(self, spring: 'Spring3D', annotation_size: float, color: str, deformed: bool, scale: float, combo_name: Optional[str]) -> None:
+    def __init__(self, spring: 'Spring3D', annotation_size: float, color: str, deformed: bool, scale: float, combo_name: Optional[str], opacity: float = 1.0) -> None:
         """Build visual elements for a spring.
 
         :param Spring3D spring: Spring to visualize.
@@ -1723,6 +1809,7 @@ class VisSpring:
         :param bool deformed: If ``True`` use deformed coordinates.
         :param float scale: Deformation scale factor.
         :param str | None combo_name: Load combination for displacements.
+        :param float opacity: Opacity for the spring (default 1.0).
         """
         self.spring = spring
         self.annotation_size = annotation_size
@@ -1730,6 +1817,7 @@ class VisSpring:
         self.deformed = deformed
         self.scale = scale
         self.combo_name = combo_name
+        self.opacity = opacity
         self.mesh: Optional[pv.PolyData] = None
         self.label = spring.name
         self.label_point: Optional[List[float]] = None
@@ -1798,13 +1886,13 @@ class VisSpring:
         :param pv.Plotter plotter: Plotter to receive the mesh.
         """
         if self.mesh is not None:
-            plotter.add_mesh(self.mesh, color=self.color, line_width=2)
+            plotter.add_mesh(self.mesh, color=self.color, line_width=2, opacity=self.opacity)
 
 
 class VisMember:
     """Visual wrapper for a Member3D as a simple line."""
 
-    def __init__(self, member: 'Member3D', theme: str, annotation_size: float = 0.0, render_lcs: bool = False, lcs_size: float = 0.0) -> None:
+    def __init__(self, member: 'Member3D', theme: str, annotation_size: float = 0.0, render_lcs: bool = False, lcs_size: float = 0.0, opacity: float = 1.0) -> None:
         """Build visual elements for a member.
 
         :param Member3D member: Member to visualize.
@@ -1812,12 +1900,14 @@ class VisMember:
         :param float annotation_size: Base size for annotations.
         :param bool render_lcs: Whether to render the local coordinate system.
         :param float lcs_size: Size for LCS arrows.
+        :param float opacity: Opacity for the member (default 1.0).
         """
         self.member = member
         self.theme = theme
         self.annotation_size = annotation_size
         self.render_lcs = render_lcs
         self.lcs_size = lcs_size
+        self.opacity = opacity
         self.main_mesh: pv.PolyData = self._build_geometry()
         self.lcs_meshes: List[Tuple[pv.PolyData, str]] = []
         
@@ -1880,25 +1970,27 @@ class VisMember:
         :param pv.Plotter plotter: Plotter to receive the mesh.
         """
         color = 'black' if self.theme == 'print' else 'black'
-        plotter.add_mesh(self.main_mesh, color=color, line_width=2)
+        plotter.add_mesh(self.main_mesh, color=color, line_width=2, opacity=self.opacity)
         
         for mesh, color in self.lcs_meshes:
-            plotter.add_mesh(mesh, color=color, line_width=2)
+            plotter.add_mesh(mesh, color=color, line_width=2, opacity=self.opacity)
 
 
 class VisDeformedMember:
     """Visual wrapper for a deformed Member3D polyline."""
 
-    def __init__(self, member: 'Member3D', scale_factor: float, combo_name: Optional[str]) -> None:
+    def __init__(self, member: 'Member3D', scale_factor: float, combo_name: Optional[str], opacity: float = 1.0) -> None:
         """Build a deformed member polyline.
 
         :param Member3D member: Member to visualize in deformed state.
         :param float scale_factor: Scale factor for displacements.
         :param str | None combo_name: Load combination name for results.
+        :param float opacity: Opacity for the deformed member (default 1.0).
         """
         self.member = member
         self.scale_factor = scale_factor
         self.combo_name = combo_name
+        self.opacity = opacity
         self.mesh: Optional[pv.PolyData] = None
         self._build_geometry()
 
@@ -1945,7 +2037,7 @@ class VisDeformedMember:
         :param pv.Plotter plotter: Plotter to receive the mesh.
         """
         if self.mesh is not None:
-            plotter.add_mesh(self.mesh, color='red', line_width=2)
+            plotter.add_mesh(self.mesh, color='red', line_width=2, opacity=self.opacity)
 
 def _PerpVector(v):
     """Return a unit vector perpendicular to ``v``.
