@@ -60,6 +60,7 @@ class Renderer:
         self._render_nodes: bool = True
         self._render_loads: bool = True
         self._render_lcs: bool = False
+        self._render_lcs_size: Optional[float] = None  # None means use annotation_size
         self._color_map: Optional[str] = None
         self._combo_name: Optional[str] = 'Combo 1'
         self._case: Optional[str] = None
@@ -182,6 +183,20 @@ class Renderer:
     @render_lcs.setter
     def render_lcs(self, render_lcs: bool) -> None:
         self._render_lcs = render_lcs
+
+    @property
+    def render_lcs_size(self) -> float:
+        """Size of local coordinate system arrows in model units.
+
+        Defaults to ``annotation_size`` if not manually set.
+        """
+        if self._render_lcs_size is None:
+            return self.annotation_size
+        return self._render_lcs_size
+
+    @render_lcs_size.setter
+    def render_lcs_size(self, size: float) -> None:
+        self._render_lcs_size = size
 
     @property
     def color_map(self) -> Optional[str]:
@@ -414,7 +429,7 @@ class Renderer:
                 vis_spring.add_to_plotter(self.plotter)
 
         if self.model.members:
-            vis_members = [VisMember(member, self.theme, self.annotation_size, self.render_lcs) for member in self.model.members.values()]
+            vis_members = [VisMember(member, self.theme, self.annotation_size, self.render_lcs, self.render_lcs_size) for member in self.model.members.values()]
             for vis_member in vis_members:
                 vis_member.add_to_plotter(self.plotter)
 
@@ -1789,18 +1804,20 @@ class VisSpring:
 class VisMember:
     """Visual wrapper for a Member3D as a simple line."""
 
-    def __init__(self, member: 'Member3D', theme: str, annotation_size: float = 0.0, render_lcs: bool = False) -> None:
+    def __init__(self, member: 'Member3D', theme: str, annotation_size: float = 0.0, render_lcs: bool = False, lcs_size: float = 0.0) -> None:
         """Build visual elements for a member.
 
         :param Member3D member: Member to visualize.
         :param str theme: Rendering theme (``'default'`` or ``'print'``).
-        :param float annotation_size: Size for LCS arrows.
+        :param float annotation_size: Base size for annotations.
         :param bool render_lcs: Whether to render the local coordinate system.
+        :param float lcs_size: Size for LCS arrows.
         """
         self.member = member
         self.theme = theme
         self.annotation_size = annotation_size
         self.render_lcs = render_lcs
+        self.lcs_size = lcs_size
         self.main_mesh: pv.PolyData = self._build_geometry()
         self.lcs_meshes: List[Tuple[pv.PolyData, str]] = []
         
@@ -1830,8 +1847,8 @@ class VisMember:
         y_axis = T[1, 0:3]
         z_axis = T[2, 0:3]
         
-        # Arrow scale - use annotation size
-        s = self.annotation_size
+        # Arrow scale - use LCS size
+        s = self.lcs_size
         
         # Build arrows for each axis
         # Local x: Red, Local y: Green, Local z: Blue
