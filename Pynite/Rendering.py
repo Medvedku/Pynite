@@ -65,6 +65,8 @@ class Renderer:
         self._combo_name: Optional[str] = 'Combo 1'
         self._case: Optional[str] = None
         self._labels: bool = True
+        self._render_node_names: bool = True
+        self._render_member_names: bool = True
         self._scalar_bar: bool = False
         self._scalar_bar_text_size: int = 24
         self._member_diagrams: Optional[str] = None  # Options: None, 'Fy', 'Fz', 'My', 'Mz', 'Fx', 'Tx'
@@ -234,6 +236,22 @@ class Renderer:
     @show_labels.setter
     def show_labels(self, show_labels: bool) -> None:
         self._labels = show_labels
+
+    @property
+    def render_node_names(self) -> bool:
+        return self._render_node_names
+
+    @render_node_names.setter
+    def render_node_names(self, render_node_names: bool) -> None:
+        self._render_node_names = render_node_names
+
+    @property
+    def render_member_names(self) -> bool:
+        return self._render_member_names
+
+    @render_member_names.setter
+    def render_member_names(self, render_member_names: bool) -> None:
+        self._render_member_names = render_member_names
 
     @property
     def scalar_bar(self) -> bool:
@@ -510,7 +528,7 @@ class Renderer:
 
         # Render labels if requested. We gather label locations from the visual helper classes to
         # avoid duplicating coordinate math here.
-        if self.show_labels and vis_nodes:
+        if self.show_labels and self.render_node_names and vis_nodes:
             label_points = [vis_node.label_point for vis_node in vis_nodes]
             labels = [vis_node.label for vis_node in vis_nodes]
             self.plotter.add_point_labels(label_points, labels, bold=False, text_color='black', show_points=True, point_color='grey', point_size=5, shape=None, render_points_as_spheres=True)
@@ -520,7 +538,7 @@ class Renderer:
             self._spring_labels = [vis_spring.label for vis_spring in vis_springs]
             self.plotter.add_point_labels(self._spring_label_points, self._spring_labels, text_color='black', bold=False, shape=None, render_points_as_spheres=False)
 
-        if self.show_labels and vis_members:
+        if self.show_labels and self.render_member_names and vis_members:
             label_points = [vis_member.label_point for vis_member in vis_members]
             labels = [vis_member.label for vis_member in vis_members]
             self.plotter.add_point_labels(label_points, labels, bold=False, text_color='black', show_points=False, shape=None, render_points_as_spheres=False)

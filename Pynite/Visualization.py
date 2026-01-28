@@ -58,6 +58,8 @@ class Renderer():
         self._combo_name = 'Combo 1'
         self._case = None
         self._labels = True
+        self._render_node_names = True
+        self._render_member_names = True
         self._scalar_bar = False
         self._scalar_bar_text_size = 24
         self._theme = 'default'
@@ -183,6 +185,24 @@ class Renderer():
     @labels.setter
     def labels(self, value):
         self._labels = value
+
+    @property
+    def render_node_names(self):
+        """Whether to display text labels for nodes."""
+        return self._render_node_names
+
+    @render_node_names.setter
+    def render_node_names(self, value):
+        self._render_node_names = value
+
+    @property
+    def render_member_names(self):
+        """Whether to display text labels for members."""
+        return self._render_member_names
+
+    @render_member_names.setter
+    def render_member_names(self, value):
+        self._render_member_names = value
 
     @property
     def scalar_bar(self):
@@ -475,7 +495,7 @@ class Renderer():
             # Add the actor for the member
             renderer.AddActor(vis_member.actor)
 
-            if self.labels == True:
+            if self.labels == True and self.render_member_names == True:
 
                 # Add the actor for the member label
                 renderer.AddActor(vis_member.lblActor)
@@ -497,7 +517,7 @@ class Renderer():
                 # Add the node's polydata
                 node_polydata.AddInputData(vis_node.polydata.GetOutput())
 
-                if self.labels == True:
+                if self.labels == True and self.render_node_names == True:
 
                     if self.theme == 'print':
 
